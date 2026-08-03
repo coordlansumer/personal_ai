@@ -192,7 +192,7 @@ def test_chat_streams_when_session_exists_fails(ctx, monkeypatch):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(db, "session_exists", _boom)
-    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    res = ctx["client"].post("/api/chat", json={"message": "hi", "session_id": "abc123"})
     assert res.status_code == 200
     assert '"type": "done"' in res.text
 
