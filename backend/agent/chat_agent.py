@@ -54,9 +54,16 @@ class ChatAgent:
     def validate_config(self) -> None:
         self._get_client()
 
-    async def stream_chat(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+    async def stream_chat(
+        self,
+        messages: list[dict[str, str]],
+        memory_context: str | None = None,
+    ) -> AsyncIterator[str]:
         client = self._get_client()
-        full_messages = [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
+        system = SYSTEM_PROMPT
+        if memory_context:
+            system = f"{system}\n\n{memory_context}"
+        full_messages = [{"role": "system", "content": system}, *messages]
         try:
             stream = await client.chat.completions.create(
                 model=self.model,
