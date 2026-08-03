@@ -92,12 +92,13 @@ async def test_list_sessions_returns_isoformat(fake_db):
 
 
 async def test_load_recent_messages_reverses_order(fake_db):
-    fake_db.append({"role": "user", "content": "a"})
+    # Fake emulates ORDER BY id DESC: newest (b) first, oldest (a) second.
     fake_db.append({"role": "assistant", "content": "b"})
+    fake_db.append({"role": "user", "content": "a"})
     rows = await db.load_recent_messages("s1", limit=5)
     assert rows == [
-        {"role": "assistant", "content": "b"},
         {"role": "user", "content": "a"},
+        {"role": "assistant", "content": "b"},
     ]
 
 

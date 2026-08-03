@@ -90,6 +90,7 @@ async def load_recent_messages(session_id: str, limit: int = 20) -> list[dict]:
 
 
 async def append_messages(session_id: str, messages: list[dict]) -> None:
+    """Insert messages for a session; the sessions row must already exist."""
     async with await _conn() as conn:
         async with conn.cursor() as cur:
             for msg in messages:
