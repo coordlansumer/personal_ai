@@ -230,3 +230,16 @@ def test_chat_with_empty_recall_injects_no_memory(ctx):
     res = ctx["client"].post("/api/chat", json={"message": "hi"})
     assert res.status_code == 200
     assert ctx["agent"].last_memory_context is None
+
+
+def test_startup_survives_qdrant_down(monkeypatch):
+    async def _noop():
+        pass
+
+    async def _boom():
+        raise RuntimeError("qdrant down")
+
+    monkeypatch.setattr(db, "init_db", _noop)
+    monkeypatch.setattr(semantic, "ensure_collection", _boom)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
