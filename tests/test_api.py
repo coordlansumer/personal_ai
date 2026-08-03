@@ -4,15 +4,21 @@ from fastapi.testclient import TestClient
 from agent.chat_agent import APIKeyMissingError
 from database import db
 from main import app
-from memory.store import MemoryStore
-from api import routes
+from memory.semantic import semantic
+from memory.short_term import short_term
 
 
 class FakeAgent:
+    def __init__(self):
+        self.last_messages = None
+        self.last_memory_context = None
+
     def validate_config(self):
         pass
 
-    async def stream_chat(self, messages):
+    async def stream_chat(self, messages, memory_context=None):
+        self.last_messages = messages
+        self.last_memory_context = memory_context
         for token in ["你", "好"]:
             yield token
 
@@ -22,25 +28,93 @@ class NoKeyAgent:
         raise APIKeyMissingError("未配置 DEEPSEEK_API_KEY")
 
 
+class FakeDB:
+    def __init__(self):
+        self.session_ids = set()
+        self.appended = []
+        self.sessions_list = []
+
+    async def session_exists(self, sid):
+        return sid in self.session_ids
+
+    async def upsert_session(self, sid):
+        self.session_ids.add(sid)
+
+    async def list_sessions(self):
+        return self.sessions_list
+
+    async def load_recent_messages(self, sid, limit=20):
+        return []
+
+    async def append_messages(self, sid, msgs):
+        self.appended.append((sid, msgs))
+
+
+class FakeSemantic:
+    def __init__(self):
+        self.recall_results = []
+        self.recall_error = None
+        self.stored = []
+
+    async def recall(self, message):
+        if self.recall_error:
+            raise self.recall_error
+        return self.recall_results
+
+    async def store_message(self, sid, role, content):
+        self.stored.append((sid, role, content))
+
+
+class FakeShortTerm:
+    def __init__(self):
+        self.contexts = {}
+        self.set_calls = []
+
+    async def get_context(self, sid):
+        return self.contexts.get(sid)
+
+    async def set_context(self, sid, messages):
+        self.contexts[sid] = messages
+        self.set_calls.append((sid, messages))
+
+
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setattr(routes, "agent", FakeAgent())
-    monkeypatch.setattr(routes, "store", MemoryStore())
-    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
-    with TestClient(app) as c:
-        yield c
+def ctx(monkeypatch):
+    async def _noop():
+        pass
+
+    fake_db = FakeDB()
+    fake_semantic = FakeSemantic()
+    fake_short = FakeShortTerm()
+    fake_agent = FakeAgent()
+
+    monkeypatch.setattr(db, "init_db", _noop)
+    monkeypatch.setattr(db, "session_exists", fake_db.session_exists)
+    monkeypatch.setattr(db, "upsert_session", fake_db.upsert_session)
+    monkeypatch.setattr(db, "list_sessions", fake_db.list_sessions)
+    monkeypatch.setattr(db, "load_recent_messages", fake_db.load_recent_messages)
+    monkeypatch.setattr(db, "append_messages", fake_db.append_messages)
+    monkeypatch.setattr(semantic, "ensure_collection", _noop)
+    monkeypatch.setattr(semantic, "recall", fake_semantic.recall)
+    monkeypatch.setattr(semantic, "store_message", fake_semantic.store_message)
+    monkeypatch.setattr(short_term, "get_context", fake_short.get_context)
+    monkeypatch.setattr(short_term, "set_context", fake_short.set_context)
+    monkeypatch.setattr("api.routes.agent", fake_agent)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+    with TestClient(app) as client:
+        yield {"client": client, "db": fake_db, "semantic": fake_semantic, "short_term": fake_short, "agent": fake_agent}
 
 
-def test_health(client):
-    res = client.get("/api/health")
+def test_health(ctx):
+    res = ctx["client"].get("/api/health")
     assert res.status_code == 200
-    body = res.json()
-    assert body["status"] == "ok"
-    assert body["llm_configured"] is True
+    assert res.json()["status"] == "ok"
+    assert res.json()["llm_configured"] is True
 
 
-def test_chat_streams_sse(client):
-    res = client.post("/api/chat", json={"message": "hi"})
+def test_chat_streams_sse(ctx):
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
     assert res.status_code == 200
     assert "text/event-stream" in res.headers["content-type"]
     body = res.text
@@ -49,41 +123,44 @@ def test_chat_streams_sse(client):
     assert '"type": "done"' in body
 
 
-def test_chat_saves_history_and_session(client):
-    res = client.post("/api/chat", json={"message": "hi"})
-    assert res.status_code == 200
-    sessions = client.get("/api/sessions").json()["sessions"]
-    assert len(sessions) == 1
-    sid = sessions[0]["id"]
-    history = routes.store.get_history(sid)
-    assert history == [
-        {"role": "user", "content": "hi"},
-        {"role": "assistant", "content": "你好"},
+def test_chat_persists_to_all_layers(ctx):
+    ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert len(ctx["db"].appended) == 1
+    sid, msgs = ctx["db"].appended[0]
+    assert [m["role"] for m in msgs] == ["user", "assistant"]
+    assert ctx["short_term"].contexts[sid] == msgs
+    assert [(r, c) for _, r, c in ctx["semantic"].stored] == [("user", "hi"), ("assistant", "你好")]
+
+
+def test_chat_injects_memory_block(ctx):
+    ctx["semantic"].recall_results = [
+        {"content": "我喜欢咖啡", "role": "user", "created_at": "2026-01-01T00:00:00+00:00", "score": 0.9}
     ]
-
-
-def test_chat_continues_existing_session(client):
-    sid = routes.store.create_session()
-    res = client.post("/api/chat", json={"message": "again", "session_id": sid})
+    res = ctx["client"].post("/api/chat", json={"message": "咖啡"})
     assert res.status_code == 200
-    history = routes.store.get_history(sid)
-    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert ctx["agent"].last_memory_context is not None
+    assert "我喜欢咖啡" in ctx["agent"].last_memory_context
 
 
-def test_chat_empty_message_returns_400(client):
-    res = client.post("/api/chat", json={"message": "   "})
+def test_chat_degrades_when_recall_fails(ctx):
+    ctx["semantic"].recall_error = RuntimeError("qdrant down")
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert res.status_code == 200
+    assert ctx["agent"].last_memory_context is None
+
+
+def test_chat_empty_message_returns_400(ctx):
+    res = ctx["client"].post("/api/chat", json={"message": "   "})
     assert res.status_code == 400
 
 
-def test_chat_unknown_session_returns_404(client):
-    res = client.post(
-        "/api/chat", json={"message": "hi", "session_id": "deadbeef"}
-    )
+def test_chat_unknown_session_returns_404(ctx):
+    res = ctx["client"].post("/api/chat", json={"message": "hi", "session_id": "deadbeef"})
     assert res.status_code == 404
 
 
-def test_chat_missing_api_key_returns_503(client, monkeypatch):
-    monkeypatch.setattr(routes, "agent", NoKeyAgent())
-    res = client.post("/api/chat", json={"message": "hi"})
+def test_chat_missing_api_key_returns_503(ctx, monkeypatch):
+    monkeypatch.setattr("api.routes.agent", NoKeyAgent())
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
     assert res.status_code == 503
     assert "DEEPSEEK_API_KEY" in res.json()["detail"]
