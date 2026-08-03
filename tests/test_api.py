@@ -164,3 +164,69 @@ def test_chat_missing_api_key_returns_503(ctx, monkeypatch):
     res = ctx["client"].post("/api/chat", json={"message": "hi"})
     assert res.status_code == 503
     assert "DEEPSEEK_API_KEY" in res.json()["detail"]
+
+
+def test_chat_persistence_failure_still_yields_done(ctx, monkeypatch):
+    async def _boom(sid, msgs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(db, "append_messages", _boom)
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert res.status_code == 200
+    assert '"type": "done"' in res.text
+
+
+def test_chat_streams_when_upsert_fails(ctx, monkeypatch):
+    async def _boom(sid):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(db, "upsert_session", _boom)
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert res.status_code == 200
+    assert '"type": "token"' in res.text
+    assert '"type": "done"' in res.text
+
+
+def test_chat_streams_when_session_exists_fails(ctx, monkeypatch):
+    async def _boom(sid):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(db, "session_exists", _boom)
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert res.status_code == 200
+    assert '"type": "done"' in res.text
+
+
+def test_recent_context_falls_back_to_db_when_redis_empty(ctx, monkeypatch):
+    recent = [{"role": "assistant", "content": "早前回复"}]
+
+    async def _load(sid, limit=20):
+        return recent
+
+    monkeypatch.setattr(db, "load_recent_messages", _load)
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert res.status_code == 200
+    assert ctx["agent"].last_messages[0] == {"role": "assistant", "content": "早前回复"}
+    assert len(ctx["short_term"].set_calls) >= 1
+
+
+def test_recent_context_serves_db_when_redis_write_fails(ctx, monkeypatch):
+    recent = [{"role": "assistant", "content": "早前回复"}]
+
+    async def _load(sid, limit=20):
+        return recent
+
+    async def _boom(sid, messages):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(db, "load_recent_messages", _load)
+    monkeypatch.setattr(short_term, "set_context", _boom)
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert res.status_code == 200
+    assert ctx["agent"].last_messages[0] == {"role": "assistant", "content": "早前回复"}
+
+
+def test_chat_with_empty_recall_injects_no_memory(ctx):
+    res = ctx["client"].post("/api/chat", json={"message": "hi"})
+    assert res.status_code == 200
+    assert ctx["agent"].last_memory_context is None
