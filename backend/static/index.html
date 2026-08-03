@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Personal AI OS</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #171a23;
+      --border: #2a2f3a;
+      --text: #e6e9f0;
+      --muted: #8b91a0;
+      --accent: #4f8cff;
+      --user: #2b2f3a;
+      --assistant: #1d2230;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    #status {
+      font-size: 12px;
+      color: var(--muted);
+      margin-left: auto;
+    }
+    #status.ok { color: #4ade80; }
+    #status.err { color: #f87171; }
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .msg {
+      max-width: 78%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user { align-self: flex-end; background: var(--user); }
+    .msg.assistant { align-self: flex-start; background: var(--assistant); border: 1px solid var(--border); }
+    .msg.error { align-self: flex-start; background: #3a1d1d; color: #fca5a5; border: 1px solid #7f1d1d; }
+    .msg .cursor { animation: blink 1s step-start infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    footer {
+      display: flex;
+      gap: 10px;
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+    }
+    #input {
+      flex: 1;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 14px;
+      outline: none;
+      resize: none;
+    }
+    #input:focus { border-color: var(--accent); }
+    #send {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 0 22px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .placeholder { color: var(--muted); text-align: center; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Personal AI OS</h1>
+    <span id="status">连接中…</span>
+  </header>
+  <main id="messages"></main>
+  <footer>
+    <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+    <button id="send">发送</button>
+  </footer>
+
+  <script>
+    const main = document.getElementById("messages");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+    let sessionId = localStorage.getItem("ai_session_id") || null;
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = cls || "";
+    }
+
+    async function checkHealth() {
+      try {
+        const res = await fetch("/api/health");
+        const data = await res.json();
+        if (data.status === "ok" && data.llm_configured) {
+          setStatus("LLM 已连接 · " + data.model, "ok");
+        } else {
+          setStatus("未配置 DEEPSEEK_API_KEY", "err");
+        }
+      } catch (e) {
+        setStatus("服务未启动", "err");
+      }
+    }
+
+    function addMessage(role, text) {
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      div.textContent = text;
+      main.appendChild(div);
+      main.scrollTop = main.scrollHeight;
+      return div;
+    }
+
+    // Read an SSE body from a fetch POST and invoke handlers per event.
+    async function consumeSSE(res, onEvent) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("data: ")) {
+              onEvent(JSON.parse(line.slice(6)));
+            }
+          }
+        }
+      }
+    }
+
+    async function send() {
+      const text = input.value.trim();
+      if (!text || sendBtn.disabled) return;
+      input.value = "";
+      sendBtn.disabled = true;
+
+      addMessage("user", text);
+      const assistantEl = addMessage("assistant", "");
+      assistantEl.innerHTML = '<span class="cursor">▌</span>';
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, session_id: sessionId }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          assistantEl.className = "msg error";
+          assistantEl.textContent = "请求失败: " + (err.detail || res.status);
+          return;
+        }
+
+        let reply = "";
+        const cursor = assistantEl.querySelector(".cursor");
+        await consumeSSE(res, (ev) => {
+          if (ev.type === "session") {
+            sessionId = ev.session_id;
+            localStorage.setItem("ai_session_id", sessionId);
+          } else if (ev.type === "token") {
+            reply += ev.content;
+            assistantEl.textContent = reply;
+            assistantEl.appendChild(cursor);
+            main.scrollTop = main.scrollHeight;
+          } else if (ev.type === "error") {
+            assistantEl.className = "msg error";
+            assistantEl.textContent = "错误: " + ev.message;
+          } else if (ev.type === "done") {
+            if (cursor) cursor.remove();
+          }
+        });
+        if (assistantEl.textContent === "") assistantEl.textContent = "（无回复）";
+      } catch (e) {
+        assistantEl.className = "msg error";
+        assistantEl.textContent = "网络错误: " + e.message;
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    sendBtn.addEventListener("click", send);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    checkHealth();
+    input.focus();
+  </script>
+</body>
+</html>
