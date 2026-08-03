@@ -1,6 +1,6 @@
 """Personal AI OS backend entrypoint."""
 
-import os
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,6 +11,9 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routes import router
 from database import db
+from memory.semantic import semantic
+
+logger = logging.getLogger("personal_ai")
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR.parent / ".env")
@@ -18,11 +21,15 @@ load_dotenv(BASE_DIR.parent / ".env")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    db.init_db()
+    await db.init_db()
+    try:
+        await semantic.ensure_collection()
+    except Exception as exc:
+        logger.warning("Qdrant unavailable at startup: %s", exc)
     yield
 
 
-app = FastAPI(title="Personal AI OS", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Personal AI OS", version="0.2.0", lifespan=lifespan)
 app.include_router(router)
 
 STATIC_DIR = BASE_DIR / "static"
