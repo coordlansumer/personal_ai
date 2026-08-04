@@ -169,46 +169,57 @@
       const assistantEl = addMessage("assistant", "");
       assistantEl.innerHTML = '<span class="cursor">▌</span>';
 
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, session_id: sessionId }),
-        });
+      let reply = "";
+      const cursor = assistantEl.querySelector(".cursor");
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: res.statusText }));
+      // If the stored session no longer exists (e.g. DB was reset), start a fresh one once.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: text, session_id: sessionId }),
+          });
+
+          if (res.status === 404 && sessionId && attempt === 0) {
+            sessionId = null;
+            localStorage.removeItem("ai_session_id");
+            continue;
+          }
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            assistantEl.className = "msg error";
+            assistantEl.textContent = "请求失败: " + (err.detail || res.status);
+            return;
+          }
+
+          await consumeSSE(res, (ev) => {
+            if (ev.type === "session") {
+              sessionId = ev.session_id;
+              localStorage.setItem("ai_session_id", sessionId);
+            } else if (ev.type === "token") {
+              reply += ev.content;
+              assistantEl.textContent = reply;
+              assistantEl.appendChild(cursor);
+              main.scrollTop = main.scrollHeight;
+            } else if (ev.type === "error") {
+              assistantEl.className = "msg error";
+              assistantEl.textContent = "错误: " + ev.message;
+            } else if (ev.type === "done") {
+              if (cursor) cursor.remove();
+            }
+          });
+          break;
+        } catch (e) {
           assistantEl.className = "msg error";
-          assistantEl.textContent = "请求失败: " + (err.detail || res.status);
+          assistantEl.textContent = "网络错误: " + e.message;
           return;
         }
-
-        let reply = "";
-        const cursor = assistantEl.querySelector(".cursor");
-        await consumeSSE(res, (ev) => {
-          if (ev.type === "session") {
-            sessionId = ev.session_id;
-            localStorage.setItem("ai_session_id", sessionId);
-          } else if (ev.type === "token") {
-            reply += ev.content;
-            assistantEl.textContent = reply;
-            assistantEl.appendChild(cursor);
-            main.scrollTop = main.scrollHeight;
-          } else if (ev.type === "error") {
-            assistantEl.className = "msg error";
-            assistantEl.textContent = "错误: " + ev.message;
-          } else if (ev.type === "done") {
-            if (cursor) cursor.remove();
-          }
-        });
-        if (assistantEl.textContent === "") assistantEl.textContent = "（无回复）";
-      } catch (e) {
-        assistantEl.className = "msg error";
-        assistantEl.textContent = "网络错误: " + e.message;
-      } finally {
-        sendBtn.disabled = false;
-        input.focus();
       }
+      if (assistantEl.textContent === "") assistantEl.textContent = "（无回复）";
+      sendBtn.disabled = false;
+      input.focus();
     }
 
     sendBtn.addEventListener("click", send);
