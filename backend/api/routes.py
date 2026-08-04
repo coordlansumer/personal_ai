@@ -213,3 +213,26 @@ async def delete_todo(todo_id: int) -> dict:
     if not ok:
         raise HTTPException(status_code=404, detail="待办不存在")
     return {"deleted": True, "id": todo_id}
+
+
+@router.get("/notes")
+async def list_notes() -> dict:
+    rows = await note_store.list_notes()
+    return {"notes": [jsonable_row(r) for r in rows], "count": len(rows)}
+
+
+@router.get("/notes/search")
+async def search_notes(q: str, top_k: int = 5) -> dict:
+    q = q.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="搜索词不能为空")
+    hits = await semantic.search_notes(q, top_k=top_k)
+    return {"hits": hits, "count": len(hits)}
+
+
+@router.delete("/notes/{note_id}")
+async def delete_note(note_id: int) -> dict:
+    ok = await note_store.delete_note(note_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    return {"deleted": True, "id": note_id}

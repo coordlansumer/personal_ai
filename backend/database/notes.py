@@ -36,3 +36,13 @@ async def delete_note(note_id: int) -> bool:
         async with conn.cursor() as cur:
             await cur.execute("DELETE FROM notes WHERE id = %s", (note_id,))
             return cur.rowcount > 0
+
+
+async def list_notes(limit: int = 50) -> list[dict]:
+    async with await _conn() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, content, created_at FROM notes ORDER BY id DESC LIMIT %s",
+                (limit,),
+            )
+            return await cur.fetchall()

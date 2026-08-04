@@ -70,3 +70,14 @@ async def test_delete_note_returns_bool(fake_conn):
     assert await notes.delete_note(5) is True
     fake_conn["conn"].cursor_obj.rowcount = 0
     assert await notes.delete_note(5) is False
+
+
+async def test_list_notes_returns_rows(fake_conn):
+    fake_conn["conn"] = FakeConn(
+        fetchall_results=[{"id": 1, "content": "买牛奶", "created_at": "2026-08-04T10:00:00+00:00"}]
+    )
+    rows = await notes.list_notes()
+    assert rows[0]["content"] == "买牛奶"
+    sql, params = fake_conn["conn"].cursor_obj.statements[0]
+    assert "ORDER BY id DESC" in sql
+    assert params == (50,)
