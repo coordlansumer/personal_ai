@@ -14,6 +14,7 @@ from agent.chat_agent import APIKeyMissingError, LLMError, agent
 from agent.orchestrator import ToolAgent
 from database import db
 from database import notes as note_store
+from database import todos as todo_store
 from memory.semantic import semantic
 from memory.short_term import short_term
 from tools import jsonable_row
@@ -175,3 +176,40 @@ async def create_note(req: NoteRequest) -> dict:
     except Exception as exc:
         logger.warning("note embed failed: %s", exc)
     return jsonable_row(note)
+
+
+class TodoCreate(BaseModel):
+    title: str
+    due_at: str | None = None
+    category: str | None = None
+
+
+@router.get("/todos")
+async def list_todos(status: str | None = None) -> dict:
+    rows = await todo_store.list_todos(status=status)
+    return {"todos": [jsonable_row(r) for r in rows], "count": len(rows)}
+
+
+@router.post("/todos")
+async def create_todo(req: TodoCreate) -> dict:
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+    row = await todo_store.create_todo(title, due_at=req.due_at, category=req.category)
+    return jsonable_row(row)
+
+
+@router.post("/todos/{todo_id}/complete")
+async def complete_todo(todo_id: int) -> dict:
+    ok = await todo_store.complete_todo(todo_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="待办不存在")
+    return {"completed": True, "id": todo_id}
+
+
+@router.delete("/todos/{todo_id}")
+async def delete_todo(todo_id: int) -> dict:
+    ok = await todo_store.delete_todo(todo_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="待办不存在")
+    return {"deleted": True, "id": todo_id}
