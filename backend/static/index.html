@@ -60,6 +60,22 @@
     .msg.error { align-self: flex-start; background: #3a1d1d; color: #fca5a5; border: 1px solid #7f1d1d; }
     .msg .cursor { animation: blink 1s step-start infinite; }
     @keyframes blink { 50% { opacity: 0; } }
+    .tool-call {
+      align-self: flex-start;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      max-width: 78%;
+    }
+    .tool-result {
+      margin-top: 4px;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     footer {
       display: flex;
       gap: 10px;
@@ -99,6 +115,7 @@
   <main id="messages"></main>
   <footer>
     <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+    <button id="note-btn" title="把当前输入记成笔记">记笔记</button>
     <button id="send">发送</button>
   </footer>
 
@@ -135,6 +152,21 @@
       main.appendChild(div);
       main.scrollTop = main.scrollHeight;
       return div;
+    }
+
+    function addToolCard(ev) {
+      const div = document.createElement("div");
+      div.className = "tool-call";
+      const args = JSON.stringify(ev.arguments || {});
+      const head = document.createElement("div");
+      head.textContent = "工具调用 " + ev.name + "(" + args + ")";
+      const result = document.createElement("div");
+      result.className = "tool-result";
+      result.textContent = typeof ev.result === "string" ? ev.result : JSON.stringify(ev.result, null, 2);
+      div.appendChild(head);
+      div.appendChild(result);
+      main.appendChild(div);
+      main.scrollTop = main.scrollHeight;
     }
 
     // Read an SSE body from a fetch POST and invoke handlers per event.
@@ -206,6 +238,8 @@
             } else if (ev.type === "error") {
               assistantEl.className = "msg error";
               assistantEl.textContent = "错误: " + ev.message;
+            } else if (ev.type === "tool") {
+              addToolCard(ev);
             } else if (ev.type === "done") {
               if (cursor) cursor.remove();
             }
@@ -223,6 +257,30 @@
     }
 
     sendBtn.addEventListener("click", send);
+
+    const noteBtn = document.getElementById("note-btn");
+    noteBtn.addEventListener("click", async () => {
+      const text = input.value.trim();
+      if (!text || noteBtn.disabled) return;
+      noteBtn.disabled = true;
+      try {
+        const res = await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: text }),
+        });
+        if (res.ok) {
+          input.value = "";
+          addMessage("assistant", "已记录到笔记");
+        } else {
+          addMessage("error", "记录失败");
+        }
+      } catch (e) {
+        addMessage("error", "记录失败: " + e.message);
+      } finally {
+        noteBtn.disabled = false;
+      }
+    });
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
