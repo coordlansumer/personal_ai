@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from tools import notes as note_tools
@@ -54,6 +56,15 @@ async def test_delete_note_removes_both(monkeypatch):
     monkeypatch.setattr("tools.notes.semantic.delete_note", fake_sem_delete)
     assert await note_tools.delete_note(id=3) == {"deleted": True, "id": 3}
     assert deleted == [3]
+
+
+async def test_create_note_serializes_datetime(monkeypatch):
+    async def fake_create(content):
+        return {"id": 3, "content": content, "created_at": datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc)}
+
+    monkeypatch.setattr("tools.notes.note_store.create_note", fake_create)
+    result = await note_tools.create_note(content="买咖啡豆")
+    assert result["created_at"] == "2026-08-04T10:00:00+00:00"
 
 
 def test_tool_dicts_have_schemas():

@@ -1,7 +1,16 @@
 """Agent-facing note tools, wrapping database.notes + semantic note memory."""
 
+from datetime import date, datetime
+
 from database import notes as note_store
 from memory.semantic import semantic
+
+
+def _iso(value):
+    # psycopg returns tz-aware datetimes; tool results must stay JSON-serializable.
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
 
 
 async def create_note(content: str) -> dict:
@@ -10,7 +19,7 @@ async def create_note(content: str) -> dict:
         await semantic.store_note(note["id"], content)
     except Exception:
         pass  # 嵌入失败不阻断记录
-    return note
+    return {k: _iso(v) for k, v in note.items()}
 
 
 async def search_notes(query: str, top_k: int = 5) -> dict:
