@@ -11,7 +11,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agent.chat_agent import APIKeyMissingError, LLMError, agent
+from agent.orchestrator import ToolAgent
 from database import db
+from database import notes as note_store
 from memory.semantic import semantic
 from memory.short_term import short_term
 
@@ -19,10 +21,16 @@ logger = logging.getLogger("personal_ai.api")
 
 router = APIRouter(prefix="/api")
 
+tool_agent = ToolAgent()
+
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+
+
+class NoteRequest(BaseModel):
+    content: str
 
 
 def _sse(event_type: str, payload: dict) -> str:
@@ -119,9 +127,15 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         yield _sse("session", {"session_id": session_id})
         parts: list[str] = []
         try:
-            async for token in agent.stream_chat(history, memory_context=memory_block):
-                parts.append(token)
-                yield _sse("token", {"content": token})
+            async for ev in tool_agent.stream(history, memory_context=memory_block):
+                if ev["type"] == "token":
+                    parts.append(ev["content"])
+                    yield _sse("token", {"content": ev["content"]})
+                elif ev["type"] == "tool":
+                    yield _sse(
+                        "tool",
+                        {"name": ev["name"], "arguments": ev["arguments"], "result": ev["result"]},
+                    )
         except LLMError as exc:
             logger.error("LLM streaming failed for session %s: %s", session_id, exc)
             yield _sse("error", {"message": str(exc)})
@@ -131,7 +145,6 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             yield _sse("error", {"message": f"服务内部错误: {exc}"})
             return
 
-        # Persistence is best-effort and must not fail the stream.
         try:
             reply = "".join(parts)
             new_messages = [
@@ -148,3 +161,16 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         yield _sse("done", {})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/notes")
+async def create_note(req: NoteRequest) -> dict:
+    content = req.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="内容不能为空")
+    note = await note_store.create_note(content)
+    try:
+        await semantic.store_note(note["id"], content)
+    except Exception as exc:
+        logger.warning("note embed failed: %s", exc)
+    return note

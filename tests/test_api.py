@@ -8,19 +8,20 @@ from memory.semantic import semantic
 from memory.short_term import short_term
 
 
-class FakeAgent:
-    def __init__(self):
+class FakeToolAgent:
+    def __init__(self, events=None):
         self.last_messages = None
         self.last_memory_context = None
+        self.events = events or [
+            {"type": "token", "content": "你"},
+            {"type": "token", "content": "好"},
+        ]
 
-    def validate_config(self):
-        pass
-
-    async def stream_chat(self, messages, memory_context=None):
+    async def stream(self, messages, memory_context=None):
         self.last_messages = messages
         self.last_memory_context = memory_context
-        for token in ["你", "好"]:
-            yield token
+        for ev in self.events:
+            yield ev
 
 
 class NoKeyAgent:
@@ -86,7 +87,7 @@ def ctx(monkeypatch):
     fake_db = FakeDB()
     fake_semantic = FakeSemantic()
     fake_short = FakeShortTerm()
-    fake_agent = FakeAgent()
+    fake_agent = FakeToolAgent()
 
     monkeypatch.setattr(db, "init_db", _noop)
     monkeypatch.setattr(db, "session_exists", fake_db.session_exists)
@@ -95,11 +96,12 @@ def ctx(monkeypatch):
     monkeypatch.setattr(db, "load_recent_messages", fake_db.load_recent_messages)
     monkeypatch.setattr(db, "append_messages", fake_db.append_messages)
     monkeypatch.setattr(semantic, "ensure_collection", _noop)
+    monkeypatch.setattr(semantic, "ensure_notes_collection", _noop)
     monkeypatch.setattr(semantic, "recall", fake_semantic.recall)
     monkeypatch.setattr(semantic, "store_message", fake_semantic.store_message)
     monkeypatch.setattr(short_term, "get_context", fake_short.get_context)
     monkeypatch.setattr(short_term, "set_context", fake_short.set_context)
-    monkeypatch.setattr("api.routes.agent", fake_agent)
+    monkeypatch.setattr("api.routes.tool_agent", fake_agent)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
 
     with TestClient(app) as client:
@@ -243,3 +245,35 @@ def test_startup_survives_qdrant_down(monkeypatch):
     monkeypatch.setattr(semantic, "ensure_collection", _boom)
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
+
+
+def test_chat_emits_tool_event(ctx):
+    ctx["agent"].events = [
+        {"type": "tool", "name": "create_todo", "arguments": {"title": "买牛奶"}, "result": {"id": 1}},
+        {"type": "token", "content": "已添加"},
+    ]
+    res = ctx["client"].post("/api/chat", json={"message": "记录待办"})
+    assert res.status_code == 200
+    assert '"type": "tool"' in res.text
+    assert '"create_todo"' in res.text
+    assert '"type": "token"' in res.text
+
+
+def test_create_note_endpoint(ctx, monkeypatch):
+    async def fake_create(content):
+        return {"id": 3, "content": content, "created_at": "2026-08-04T10:00:00+00:00"}
+
+    async def fake_store(note_id, content):
+        pass
+
+    monkeypatch.setattr("api.routes.note_store.create_note", fake_create)
+    monkeypatch.setattr("api.routes.semantic.store_note", fake_store)
+    res = ctx["client"].post("/api/notes", json={"content": "买咖啡豆"})
+    assert res.status_code == 200
+    assert res.json()["content"] == "买咖啡豆"
+    assert res.json()["id"] == 3
+
+
+def test_create_note_empty_returns_400(ctx):
+    res = ctx["client"].post("/api/notes", json={"content": "   "})
+    assert res.status_code == 400
