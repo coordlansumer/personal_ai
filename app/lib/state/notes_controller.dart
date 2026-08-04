@@ -47,12 +47,16 @@ class NotesController extends ChangeNotifier {
   Future<void> remove(Note note) async {
     notes.removeWhere((n) => n.id == note.id);
     notifyListeners();
+    var failed = false;
     try {
       await apiClient.deleteNote(note.id);
     } catch (_) {
+      failed = true;
+    }
+    await load();
+    if (failed) {
       error = '删除失败';
       notifyListeners();
     }
-    await load();
   }
 }

@@ -39,12 +39,16 @@ class TodosController extends ChangeNotifier {
   Future<void> remove(Todo todo) async {
     todos.removeWhere((t) => t.id == todo.id);
     notifyListeners();
+    var failed = false;
     try {
       await apiClient.deleteTodo(todo.id);
     } catch (_) {
+      failed = true;
+    }
+    await load();
+    if (failed) {
       error = '删除失败';
       notifyListeners();
     }
-    await load();
   }
 }
