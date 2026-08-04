@@ -1,25 +1,16 @@
 """Agent-facing todo tools, wrapping database.todos."""
 
-from datetime import date, datetime
-
 from database import todos as todo_store
-
-
-def _iso(value):
-    # psycopg returns tz-aware datetimes; tool results must stay JSON-serializable.
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return value
+from tools import jsonable_row
 
 
 async def create_todo(title: str, due_at: str | None = None, category: str | None = None) -> dict:
-    row = await todo_store.create_todo(title, due_at=due_at, category=category)
-    return {k: _iso(v) for k, v in row.items()}
+    return jsonable_row(await todo_store.create_todo(title, due_at=due_at, category=category))
 
 
 async def list_todos(status: str | None = None) -> dict:
     rows = await todo_store.list_todos(status=status)
-    return {"todos": [{k: _iso(v) for k, v in r.items()} for r in rows], "count": len(rows)}
+    return {"todos": [jsonable_row(r) for r in rows], "count": len(rows)}
 
 
 async def complete_todo(id: int) -> dict:

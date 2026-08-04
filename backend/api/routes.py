@@ -16,6 +16,7 @@ from database import db
 from database import notes as note_store
 from memory.semantic import semantic
 from memory.short_term import short_term
+from tools import jsonable_row
 
 logger = logging.getLogger("personal_ai.api")
 
@@ -173,4 +174,4 @@ async def create_note(req: NoteRequest) -> dict:
         await semantic.store_note(note["id"], content)
     except Exception as exc:
         logger.warning("note embed failed: %s", exc)
-    return note
+    return jsonable_row(note)
