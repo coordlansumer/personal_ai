@@ -1,4 +1,3 @@
-// ignore_for_file: use_null_aware_elements
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -57,8 +56,8 @@ class ApiClient {
   Future<Todo> createTodo({required String title, String? dueAt, String? category}) async {
     final data = await _send('POST', '/todos', body: {
       'title': title,
-      if (dueAt != null) 'due_at': dueAt,
-      if (category != null) 'category': category,
+      'due_at': ?dueAt,
+      'category': ?category,
     });
     return Todo.fromJson(data);
   }
