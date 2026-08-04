@@ -30,7 +30,16 @@ class _NotesScreenState extends State<NotesScreen> {
     if (controller.loading) {
       list = const Center(child: CircularProgressIndicator());
     } else if (controller.error != null) {
-      list = Center(child: Text(controller.error!));
+      list = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(controller.error!),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: () => controller.load(), child: const Text('重试')),
+          ],
+        ),
+      );
     } else if (controller.notes.isEmpty) {
       list = Center(child: Text(controller.searching ? '没有搜到相关笔记' : '暂无笔记'));
     } else {

@@ -27,12 +27,24 @@ class TodosController extends ChangeNotifier {
   }
 
   Future<void> create(String title) async {
-    await apiClient.createTodo(title: title);
+    try {
+      await apiClient.createTodo(title: title);
+    } catch (e) {
+      error = '创建失败: $e';
+      notifyListeners();
+      return;
+    }
     await load();
   }
 
   Future<void> complete(Todo todo) async {
-    await apiClient.completeTodo(todo.id);
+    try {
+      await apiClient.completeTodo(todo.id);
+    } catch (e) {
+      error = '操作失败: $e';
+      notifyListeners();
+      return;
+    }
     await load();
   }
 

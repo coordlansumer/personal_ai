@@ -15,6 +15,8 @@ class FakeApiClient extends ApiClient {
   final List<Note> notes = [];
   final List<String> noteContents = [];
   bool failLoad = false;
+  bool failCreate = false;
+  bool failComplete = false;
 
   @override
   Future<List<Todo>> listTodos({String? status}) async {
@@ -24,6 +26,7 @@ class FakeApiClient extends ApiClient {
 
   @override
   Future<Todo> createTodo({required String title, String? dueAt, String? category}) async {
+    if (failCreate) throw ApiException('服务器不可用');
     final t = Todo(id: todos.length + 1, title: title);
     todos.add(t);
     return t;
@@ -31,6 +34,7 @@ class FakeApiClient extends ApiClient {
 
   @override
   Future<void> completeTodo(int id) async {
+    if (failComplete) throw ApiException('服务器不可用');
     final i = todos.indexWhere((t) => t.id == id);
     todos[i] = Todo(id: id, title: todos[i].title, status: 'done');
   }
@@ -84,6 +88,22 @@ void main() {
     api.failLoad = true;
     await c.load();
     expect(c.error, isNotNull);
+  });
+
+  test('TodosController 创建失败设错误态', () async {
+    final api = FakeApiClient()..failCreate = true;
+    final c = TodosController(apiClient: api);
+    await c.create('买牛奶');
+    expect(c.error, contains('创建失败'));
+  });
+
+  test('TodosController 完成失败设错误态', () async {
+    final api = FakeApiClient()..failComplete = true;
+    api.todos.add(Todo(id: 1, title: '买牛奶'));
+    final c = TodosController(apiClient: api);
+    await c.load();
+    await c.complete(c.todos.single);
+    expect(c.error, contains('操作失败'));
   });
 
   test('TodosController 完成与删除', () async {

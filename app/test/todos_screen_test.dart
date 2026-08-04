@@ -12,9 +12,13 @@ class FakeApiClient extends ApiClient {
   final List<Todo> todos = [];
   final List<int> completed = [];
   final List<int> deleted = [];
+  bool failLoad = false;
 
   @override
-  Future<List<Todo>> listTodos({String? status}) async => List.of(todos);
+  Future<List<Todo>> listTodos({String? status}) async {
+    if (failLoad) throw ApiException('服务器不可用');
+    return List.of(todos);
+  }
 
   @override
   Future<Todo> createTodo({required String title, String? dueAt, String? category}) async {
@@ -72,6 +76,22 @@ void main() {
   testWidgets('空态展示', (tester) async {
     final c = TodosController(apiClient: FakeApiClient());
     await tester.pumpWidget(wrap(c));
+    expect(find.text('暂无待办'), findsOneWidget);
+  });
+
+  testWidgets('错误态显示重试按钮并可重载', (tester) async {
+    final api = FakeApiClient()..failLoad = true;
+    final c = TodosController(apiClient: api);
+    await c.load();
+    await tester.pumpWidget(wrap(c));
+    await tester.pump();
+
+    expect(find.textContaining('加载失败'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+
+    api.failLoad = false;
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
     expect(find.text('暂无待办'), findsOneWidget);
   });
 

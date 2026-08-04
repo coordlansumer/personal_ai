@@ -12,9 +12,13 @@ class FakeApiClient extends ApiClient {
   final List<Note> notes = [];
   final List<int> deleted = [];
   String? lastQuery;
+  bool failLoad = false;
 
   @override
-  Future<List<Note>> listNotes() async => List.of(notes);
+  Future<List<Note>> listNotes() async {
+    if (failLoad) throw ApiException('服务器不可用');
+    return List.of(notes);
+  }
 
   @override
   Future<List<Note>> searchNotes(String query, {int topK = 5}) async {
@@ -50,6 +54,22 @@ void main() {
     expect(api.lastQuery, '咖啡');
     expect(find.textContaining('买咖啡豆'), findsOneWidget);
     expect(find.textContaining('开会记录'), findsNothing);
+  });
+
+  testWidgets('错误态显示重试按钮并可重载', (tester) async {
+    final api = FakeApiClient()..failLoad = true;
+    final c = NotesController(apiClient: api);
+    await c.load();
+    await tester.pumpWidget(wrap(c));
+    await tester.pump();
+
+    expect(find.textContaining('加载失败'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+
+    api.failLoad = false;
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无笔记'), findsOneWidget);
   });
 
   testWidgets('滑动删除笔记', (tester) async {

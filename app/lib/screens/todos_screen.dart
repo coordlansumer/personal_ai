@@ -56,7 +56,16 @@ class _TodosScreenState extends State<TodosScreen> {
     if (controller.loading) {
       body = const Center(child: CircularProgressIndicator());
     } else if (controller.error != null) {
-      body = Center(child: Text(controller.error!));
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(controller.error!),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: () => controller.load(), child: const Text('重试')),
+          ],
+        ),
+      );
     } else if (controller.todos.isEmpty) {
       body = const Center(child: Text('暂无待办'));
     } else {
