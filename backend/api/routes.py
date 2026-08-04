@@ -54,7 +54,7 @@ async def health() -> dict:
     return {
         "status": "ok",
         "llm_configured": bool(api_key),
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
     }
 
 
