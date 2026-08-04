@@ -36,6 +36,28 @@ async def init_db() -> None:
                 """
             )
             await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS todos (
+                    id BIGSERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    category TEXT,
+                    due_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    completed_at TIMESTAMPTZ
+                )
+                """
+            )
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notes (
+                    id BIGSERIAL PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            await cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id)"
             )
 

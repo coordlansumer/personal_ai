@@ -65,6 +65,8 @@ async def test_init_db_creates_tables(fake_db):
     sql = " ".join(s for s, _ in conn.cursor_obj.statements)
     assert "CREATE TABLE IF NOT EXISTS sessions" in sql
     assert "CREATE TABLE IF NOT EXISTS messages" in sql
+    assert "CREATE TABLE IF NOT EXISTS todos" in sql
+    assert "CREATE TABLE IF NOT EXISTS notes" in sql
     assert "idx_messages_session" in sql
 
 
