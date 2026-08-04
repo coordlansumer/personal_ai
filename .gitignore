@@ -1,8 +1,39 @@
+# Environment
 .env
 .claude/settings.local.json
+
+# Python
 __pycache__/
 *.py[cod]
-*.db
 .venv/
 venv/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.tox/
+.nox/
+.ipynb_checkpoints/
+
+# Database
+*.db
+
+# Logs
+*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Superpowers skill work dirs
+.superpowers/
