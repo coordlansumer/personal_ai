@@ -11,15 +11,23 @@ class TodosScreen extends StatefulWidget {
 }
 
 class _TodosScreenState extends State<TodosScreen> {
+  final _titleController = TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
   Future<void> _add() async {
     final controller = context.read<TodosController>();
-    final titleController = TextEditingController();
+    _titleController.clear();
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('新建待办'),
         content: TextField(
-          controller: titleController,
+          controller: _titleController,
           autofocus: true,
           decoration: const InputDecoration(hintText: '待办内容'),
         ),
@@ -27,7 +35,7 @@ class _TodosScreenState extends State<TodosScreen> {
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
           FilledButton(
             onPressed: () {
-              if (titleController.text.trim().isEmpty) return;
+              if (_titleController.text.trim().isEmpty) return;
               Navigator.of(ctx).pop(true);
             },
             child: const Text('确定'),
@@ -35,8 +43,7 @@ class _TodosScreenState extends State<TodosScreen> {
         ],
       ),
     );
-    final title = titleController.text.trim();
-    titleController.dispose();
+    final title = _titleController.text.trim();
     if (saved == true && title.isNotEmpty) {
       await controller.create(title);
     }

@@ -74,4 +74,17 @@ void main() {
     await tester.pumpWidget(wrap(c));
     expect(find.text('暂无待办'), findsOneWidget);
   });
+
+  testWidgets('新建待办对话框创建待办', (tester) async {
+    final api = FakeApiClient();
+    final c = TodosController(apiClient: api);
+    await tester.pumpWidget(wrap(c));
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '写周报');
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+    expect(api.todos, hasLength(1));
+    expect(api.todos.single.title, '写周报');
+  });
 }
