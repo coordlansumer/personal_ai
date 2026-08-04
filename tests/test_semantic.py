@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from memory.semantic import COLLECTION, SemanticMemory
+from memory.semantic import COLLECTION, NOTES_COLLECTION, SemanticMemory
 
 
 class FakeEmbedder:
@@ -29,6 +29,7 @@ class FakeQdrant:
         self.upserted = []
         self.hits = []
         self.last_search = {}
+        self.deleted = []
 
     async def get_collections(self):
         return SimpleNamespace(collections=[SimpleNamespace(name=n) for n in self.names])
@@ -42,6 +43,9 @@ class FakeQdrant:
     async def search(self, collection, query_vector, limit, with_payload):
         self.last_search = {"collection": collection, "limit": limit}
         return self.hits
+
+    async def delete(self, collection, points_selector):
+        self.deleted.append((collection, points_selector))
 
 
 @pytest.fixture
@@ -80,3 +84,32 @@ async def test_recall_filters_below_threshold(mem):
     assert [r["content"] for r in results] == ["A"]
     assert results[0]["score"] == 0.9
     assert mem._client.last_search["limit"] == 5
+
+
+async def test_ensure_notes_collection_creates_when_missing(mem):
+    await mem.ensure_notes_collection()
+    assert mem._client.created[0][0] == NOTES_COLLECTION
+
+
+async def test_store_note_embeds_and_upserts(mem):
+    await mem.store_note(42, "买咖啡豆")
+    point = mem._client.upserted[0]
+    assert point.payload["note_id"] == "42"
+    assert point.payload["content"] == "买咖啡豆"
+    assert len(point.vector) == 4
+
+
+async def test_search_notes_returns_hits(mem):
+    mem._client.hits = [FakeHit(score=0.9, payload={"note_id": "42", "content": "买咖啡豆"})]
+    hits = await mem.search_notes("咖啡", top_k=3)
+    assert hits == [{"note_id": "42", "content": "买咖啡豆", "score": 0.9}]
+    assert mem._client.last_search["collection"] == NOTES_COLLECTION
+
+
+async def test_delete_note_filters_by_note_id(mem):
+    await mem.delete_note(42)
+    coll, selector = mem._client.deleted[0]
+    assert coll == NOTES_COLLECTION
+    must = selector.filter.must
+    assert must[0].key == "note_id"
+    assert must[0].match.value == "42"

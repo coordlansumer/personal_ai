@@ -24,6 +24,7 @@ async def lifespan(_: FastAPI):
     await db.init_db()
     try:
         await semantic.ensure_collection()
+        await semantic.ensure_notes_collection()
     except Exception as exc:
         logger.warning("Qdrant unavailable at startup: %s", exc)
     yield

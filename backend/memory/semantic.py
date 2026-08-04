@@ -16,6 +16,7 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 COLLECTION = "conversation_memories"
+NOTES_COLLECTION = "note_memories"
 VECTOR_SIZE = 512
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
@@ -87,6 +88,65 @@ class SemanticMemory:
                     }
                 )
         return results
+
+    async def ensure_notes_collection(self) -> None:
+        client = self._get_client()
+        collections = await client.get_collections()
+        names = {c.name for c in collections.collections}
+        if NOTES_COLLECTION not in names:
+            await client.create_collection(
+                NOTES_COLLECTION,
+                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            )
+
+    async def store_note(self, note_id: int, content: str) -> None:
+        vector = self._embed([content])[0]
+        point = PointStruct(
+            id=uuid4().hex,
+            vector=vector,
+            payload={
+                "note_id": str(note_id),
+                "content": content,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        await self._get_client().upsert(NOTES_COLLECTION, points=[point])
+
+    async def search_notes(self, query: str, top_k: int = 5) -> list[dict]:
+        vector = self._embed([query])[0]
+        hits = await self._get_client().search(
+            NOTES_COLLECTION, query_vector=vector, limit=top_k, with_payload=True
+        )
+        return [
+            {
+                "note_id": hit.payload.get("note_id", ""),
+                "content": hit.payload.get("content", ""),
+                "score": round(hit.score, 4),
+            }
+            for hit in hits
+        ]
+
+    async def delete_note(self, note_id: int) -> None:
+        from qdrant_client.models import (
+            FieldCondition,
+            Filter,
+            FilterSelector,
+            MatchValue,
+        )
+
+        client = self._get_client()
+        await client.delete(
+            NOTES_COLLECTION,
+            points_selector=FilterSelector(
+                filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="note_id", match=MatchValue(value=str(note_id))
+                        )
+                    ]
+                )
+            ),
+        )
 
 
 semantic = SemanticMemory()
