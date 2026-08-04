@@ -10,7 +10,7 @@ from typing import AsyncIterator
 from openai import AsyncOpenAI
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_MODEL = "deepseek-v4-flash"
 
 SYSTEM_PROMPT = (
     "你是 Personal AI OS 的助手，一个帮助用户完成任务的智能助手。"
@@ -58,19 +58,23 @@ class ChatAgent:
         self,
         messages: list[dict[str, str]],
         memory_context: str | None = None,
-    ) -> AsyncIterator[str]:
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[dict]:
         client = self._get_client()
         system = SYSTEM_PROMPT
         if memory_context:
             system = f"{system}\n\n{memory_context}"
         full_messages = [{"role": "system", "content": system}, *messages]
+        kwargs: dict = {
+            "model": self.model,
+            "messages": full_messages,
+            "stream": True,
+            "temperature": 0.7,
+        }
+        if tools:
+            kwargs["tools"] = tools
         try:
-            stream = await client.chat.completions.create(
-                model=self.model,
-                messages=full_messages,
-                stream=True,
-                temperature=0.7,
-            )
+            stream = await client.chat.completions.create(**kwargs)
         except Exception as exc:  # network / auth errors from the provider
             raise LLMError(f"调用 DeepSeek 失败: {exc}") from exc
 
@@ -78,8 +82,18 @@ class ChatAgent:
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
-            if delta and delta.content:
-                yield delta.content
+            if delta.content:
+                yield {"type": "content", "content": delta.content}
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    function = tc.function
+                    yield {
+                        "type": "tool_call_delta",
+                        "index": tc.index,
+                        "id": tc.id or "",
+                        "name": (function.name if function else "") or "",
+                        "arguments": (function.arguments if function else "") or "",
+                    }
 
 
 agent = ChatAgent()
